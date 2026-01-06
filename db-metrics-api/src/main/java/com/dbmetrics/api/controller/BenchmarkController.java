@@ -179,7 +179,8 @@ public class BenchmarkController {
                     .recordCount(count)
                     .batchSize(batchSize)
                     .warmupEnabled(false)
-                    .cleanupAfter(cleanup);
+                    .cleanupAfter(cleanup)
+                    .build();
                 orchestrator.runBenchmark(OperationType.BULK_READ, config);
                 log.info("✅ [{}] Bulk read benchmark completed!", jobId);
             } catch (Exception e) {
@@ -335,8 +336,7 @@ public class BenchmarkController {
             .recordCount(count)
             .batchSize(batchSize)
             .warmupEnabled(false)
-            .cleanupAfter(cleanup)
-            .build();
+            .cleanupAfter(cleanup);
         
         BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_READ, config);
         
