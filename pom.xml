@@ -84,6 +84,11 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>co.hypertest</groupId>
+            <artifactId>hypertest-agent-v3</artifactId>
+            <version>0.0.3</version>
+        </dependency>
     </dependencies>
 
     <build>
