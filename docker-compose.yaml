@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: jfrog.fkinternal.com/docker-external/mysql:8.0.40
+    container_name: dbmetrics-mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'benchmark'
+      MYSQL_USER: 'repl'
+      MYSQL_PASSWORD: 'ci'
+      MYSQL_ROOT_PASSWORD: 'root'
+    ports:
+      - "3306:3306"
+    expose:
+      - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: jfrog.fkinternal.com/docker-external/bitnami/redis:latest
+    container_name: dbmetrics-redis
+    restart: always
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aerospike
+  aerospike:
+    image: aerospike/aerospike-server:latest
+    container_name: dbmetrics-aerospike
+    restart: always
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+    volumes:
+      - aerospike_data:/opt/aerospike/data
+    environment:
+      - NAMESPACE=benchmark
+    healthcheck:
+      test: ["CMD", "asinfo", "-v", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+  aerospike_data:
+

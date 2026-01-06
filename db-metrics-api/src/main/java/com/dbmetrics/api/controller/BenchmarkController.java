@@ -1,0 +1,471 @@
+package com.dbmetrics.api.controller;
+
+import com.dbmetrics.api.dto.*;
+import com.dbmetrics.common.model.BenchmarkConfig;
+import com.dbmetrics.common.model.BenchmarkResult;
+import com.dbmetrics.common.model.DatabaseType;
+import com.dbmetrics.common.model.OperationType;
+import com.dbmetrics.orchestrator.service.BenchmarkOrchestrator;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+/**
+ * REST API for database benchmarking operations.
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/benchmark")
+@RequiredArgsConstructor
+@Tag(name = "Benchmark", description = "Database benchmarking endpoints")
+public class BenchmarkController {
+    
+    private final BenchmarkOrchestrator orchestrator;
+    
+    // ==================== Health & Status ====================
+    
+    @GetMapping("/health")
+    @Operation(summary = "Check health status of all databases")
+    public ResponseEntity<HealthResponse> health() {
+        Map<DatabaseType, Boolean> health = orchestrator.getHealthStatus();
+        List<DatabaseType> available = orchestrator.getAvailableDatabases();
+        
+        boolean allHealthy = health.values().stream().allMatch(v -> v);
+        boolean anyHealthy = health.values().stream().anyMatch(v -> v);
+        
+        String status = allHealthy ? "UP" : (anyHealthy ? "PARTIAL" : "DOWN");
+        
+        Map<String, Boolean> healthMap = health.entrySet().stream()
+            .collect(Collectors.toMap(
+                e -> e.getKey().getDisplayName(),
+                Map.Entry::getValue
+            ));
+        
+        List<String> availableList = available.stream()
+            .map(DatabaseType::getDisplayName)
+            .toList();
+        
+        return ResponseEntity.ok(HealthResponse.builder()
+            .status(status)
+            .databases(healthMap)
+            .availableDatabases(availableList)
+            .message(status.equals("UP") 
+                ? "All databases are healthy" 
+                : "Some databases are not available")
+            .build());
+    }
+    
+    // ==================== Async (Fire & Forget) Benchmarks ====================
+    
+    @PostMapping("/async/write")
+    @Operation(summary = "Async write benchmark - returns immediately, see console for results")
+    public ResponseEntity<Map<String, Object>> asyncWrite(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC write benchmark with {} records", jobId, count);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = createQuickConfig(count, cleanup);
+                orchestrator.runBenchmark(OperationType.WRITE, config);
+                log.info("✅ [{}] Write benchmark completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Write benchmark failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "WRITE",
+            "recordCount", count,
+            "message", "Benchmark started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    @PostMapping("/async/read")
+    @Operation(summary = "Async read benchmark - returns immediately, see console for results")
+    public ResponseEntity<Map<String, Object>> asyncRead(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC read benchmark with {} records", jobId, count);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = createQuickConfig(count, cleanup);
+                orchestrator.runBenchmark(OperationType.READ, config);
+                log.info("✅ [{}] Read benchmark completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Read benchmark failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "READ",
+            "recordCount", count,
+            "message", "Benchmark started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    @PostMapping("/async/bulk-write")
+    @Operation(summary = "Async bulk write benchmark - returns immediately, see console for results")
+    public ResponseEntity<Map<String, Object>> asyncBulkWrite(
+            @RequestParam(defaultValue = "10000") int count,
+            @RequestParam(defaultValue = "100") int batchSize,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC bulk write benchmark with {} records (batch: {})", jobId, count, batchSize);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = BenchmarkConfig.builder()
+                    .recordCount(count)
+                    .batchSize(batchSize)
+                    .warmupEnabled(false)
+                    .cleanupAfter(cleanup)
+                    .build();
+                orchestrator.runBenchmark(OperationType.BULK_WRITE, config);
+                log.info("✅ [{}] Bulk write benchmark completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Bulk write benchmark failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "BULK_WRITE",
+            "recordCount", count,
+            "batchSize", batchSize,
+            "message", "Benchmark started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    @PostMapping("/async/bulk-read")
+    @Operation(summary = "Async bulk read benchmark - returns immediately, see console for results")
+    public ResponseEntity<Map<String, Object>> asyncBulkRead(
+            @RequestParam(defaultValue = "10000") int count,
+            @RequestParam(defaultValue = "100") int batchSize,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC bulk read benchmark with {} records (batch: {})", jobId, count, batchSize);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = BenchmarkConfig.builder()
+                    .recordCount(count)
+                    .batchSize(batchSize)
+                    .warmupEnabled(false)
+                    .cleanupAfter(cleanup)
+                    .build();
+                orchestrator.runBenchmark(OperationType.BULK_READ, config);
+                log.info("✅ [{}] Bulk read benchmark completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Bulk read benchmark failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "BULK_READ",
+            "recordCount", count,
+            "batchSize", batchSize,
+            "message", "Benchmark started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    @PostMapping("/async/concurrent")
+    @Operation(summary = "Async concurrent benchmark - returns immediately, see console for results")
+    public ResponseEntity<Map<String, Object>> asyncConcurrent(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "4") int threads,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC concurrent benchmark with {} records ({} threads)", jobId, count, threads);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = BenchmarkConfig.builder()
+                    .recordCount(count)
+                    .threadCount(threads)
+                    .warmupEnabled(false)
+                    .cleanupAfter(cleanup)
+                    .build();
+                orchestrator.runBenchmark(OperationType.CONCURRENT_READ_WRITE, config);
+                log.info("✅ [{}] Concurrent benchmark completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Concurrent benchmark failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "CONCURRENT_READ_WRITE",
+            "recordCount", count,
+            "threadCount", threads,
+            "message", "Benchmark started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    @PostMapping("/async/full")
+    @Operation(summary = "Async full benchmark suite - runs all benchmark types")
+    public ResponseEntity<Map<String, Object>> asyncFull(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        log.info("🚀 [{}] Starting ASYNC full benchmark suite with {} records", jobId, count);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                BenchmarkConfig config = BenchmarkConfig.builder()
+                    .recordCount(count)
+                    .batchSize(Math.max(100, count / 100))
+                    .threadCount(4)
+                    .warmupEnabled(true)
+                    .warmupIterations(100)
+                    .cleanupAfter(cleanup)
+                    .build();
+                orchestrator.runFullBenchmark(config);
+                log.info("✅ [{}] Full benchmark suite completed!", jobId);
+            } catch (Exception e) {
+                log.error("❌ [{}] Full benchmark suite failed: {}", jobId, e.getMessage(), e);
+            }
+        });
+        
+        return ResponseEntity.accepted().body(Map.of(
+            "jobId", jobId,
+            "status", "STARTED",
+            "operation", "FULL_SUITE",
+            "recordCount", count,
+            "message", "Full benchmark suite started! Watch the console for results.",
+            "startedAt", Instant.now().toString()
+        ));
+    }
+    
+    // ==================== Quick Benchmarks (Synchronous) ====================
+    
+    @PostMapping("/quick/write")
+    @Operation(summary = "Quick write benchmark across all databases",
+               description = "Run a simple write benchmark with the specified record count")
+    public ResponseEntity<BenchmarkResponse> quickWrite(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        log.info("Starting quick write benchmark with {} records", count);
+        
+        BenchmarkConfig config = createQuickConfig(count, cleanup);
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.WRITE, config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    @PostMapping("/quick/read")
+    @Operation(summary = "Quick read benchmark across all databases")
+    public ResponseEntity<BenchmarkResponse> quickRead(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        log.info("Starting quick read benchmark with {} records", count);
+        
+        BenchmarkConfig config = createQuickConfig(count, cleanup);
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.READ, config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    @PostMapping("/quick/bulk-write")
+    @Operation(summary = "Quick bulk write benchmark across all databases")
+    public ResponseEntity<BenchmarkResponse> quickBulkWrite(
+            @RequestParam(defaultValue = "10000") int count,
+            @RequestParam(defaultValue = "100") int batchSize,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        log.info("Starting quick bulk write benchmark with {} records (batch size: {})", count, batchSize);
+        
+        BenchmarkConfig config = BenchmarkConfig.builder()
+            .recordCount(count)
+            .batchSize(batchSize)
+            .warmupEnabled(false)
+            .cleanupAfter(cleanup)
+            .build();
+        
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_WRITE, config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    @PostMapping("/quick/bulk-read")
+    @Operation(summary = "Quick bulk read benchmark across all databases")
+    public ResponseEntity<BenchmarkResponse> quickBulkRead(
+            @RequestParam(defaultValue = "10000") int count,
+            @RequestParam(defaultValue = "100") int batchSize,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        log.info("Starting quick bulk read benchmark with {} records (batch size: {})", count, batchSize);
+        
+        BenchmarkConfig config = BenchmarkConfig.builder()
+            .recordCount(count)
+            .batchSize(batchSize)
+            .warmupEnabled(false)
+            .cleanupAfter(cleanup)
+            .build();
+        
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_READ, config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    @PostMapping("/quick/concurrent")
+    @Operation(summary = "Quick concurrent read/write benchmark across all databases")
+    public ResponseEntity<BenchmarkResponse> quickConcurrent(
+            @RequestParam(defaultValue = "1000") int count,
+            @RequestParam(defaultValue = "4") int threads,
+            @RequestParam(defaultValue = "true") boolean cleanup) {
+        
+        log.info("Starting quick concurrent benchmark with {} records ({} threads)", count, threads);
+        
+        BenchmarkConfig config = BenchmarkConfig.builder()
+            .recordCount(count)
+            .threadCount(threads)
+            .warmupEnabled(false)
+            .cleanupAfter(cleanup)
+            .build();
+        
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.CONCURRENT_READ_WRITE, config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    // ==================== Custom Benchmarks ====================
+    
+    @PostMapping("/run")
+    @Operation(summary = "Run a custom benchmark with full configuration")
+    public ResponseEntity<BenchmarkResponse> runBenchmark(
+            @Valid @RequestBody BenchmarkRequest request) {
+        
+        log.info("Starting custom benchmark: {}", request);
+        
+        BenchmarkConfig config = BenchmarkConfig.builder()
+            .recordCount(request.getRecordCount())
+            .batchSize(request.getBatchSize())
+            .threadCount(request.getThreadCount())
+            .warmupEnabled(request.isWarmupEnabled())
+            .warmupIterations(request.getWarmupIterations())
+            .cleanupAfter(request.isCleanupAfter())
+            .includeDatabases(request.getDatabases())
+            .build();
+        
+        BenchmarkResult result = orchestrator.runBenchmark(request.getOperationType(), config);
+        
+        return ResponseEntity.ok(BenchmarkResponse.from(result));
+    }
+    
+    @PostMapping("/run/full")
+    @Operation(summary = "Run all benchmark types",
+               description = "Executes write, read, bulk-write, bulk-read, and concurrent benchmarks")
+    public ResponseEntity<List<BenchmarkResponse>> runFullBenchmark(
+            @Valid @RequestBody QuickBenchmarkRequest request) {
+        
+        log.info("Starting full benchmark suite with {} records", request.getCount());
+        
+        BenchmarkConfig config = BenchmarkConfig.builder()
+            .recordCount(request.getCount())
+            .batchSize(Math.max(100, request.getCount() / 100))
+            .threadCount(4)
+            .warmupEnabled(true)
+            .warmupIterations(100)
+            .cleanupAfter(request.isCleanup())
+            .build();
+        
+        List<BenchmarkResult> results = orchestrator.runFullBenchmark(config);
+        
+        List<BenchmarkResponse> responses = results.stream()
+            .map(BenchmarkResponse::from)
+            .toList();
+        
+        return ResponseEntity.ok(responses);
+    }
+    
+    // ==================== Utilities ====================
+    
+    @DeleteMapping("/cleanup")
+    @Operation(summary = "Cleanup all benchmark data from all databases")
+    public ResponseEntity<Map<String, String>> cleanup() {
+        log.info("Cleaning up all benchmark data");
+        
+        orchestrator.cleanupAll();
+        
+        return ResponseEntity.ok(Map.of(
+            "status", "success",
+            "message", "All benchmark data has been cleaned up"
+        ));
+    }
+    
+    @GetMapping("/presets")
+    @Operation(summary = "Get available benchmark presets")
+    public ResponseEntity<Map<String, Object>> getPresets() {
+        return ResponseEntity.ok(Map.of(
+            "quick", Map.of(
+                "description", "Fast benchmark with 1,000 records",
+                "recordCount", 1000,
+                "batchSize", 100,
+                "warmupEnabled", false
+            ),
+            "comprehensive", Map.of(
+                "description", "Thorough benchmark with 10,000 records",
+                "recordCount", 10000,
+                "batchSize", 500,
+                "warmupEnabled", true,
+                "warmupIterations", 500
+            ),
+            "stress", Map.of(
+                "description", "Stress test with 100,000 records",
+                "recordCount", 100000,
+                "batchSize", 1000,
+                "warmupEnabled", true,
+                "warmupIterations", 1000
+            )
+        ));
+    }
+    
+    private BenchmarkConfig createQuickConfig(int count, boolean cleanup) {
+        return BenchmarkConfig.builder()
+            .recordCount(count)
+            .batchSize(Math.min(100, count))
+            .threadCount(4)
+            .warmupEnabled(false)
+            .cleanupAfter(cleanup)
+            .collectDetailedMetrics(true)
+            .build();
+    }
+}
+
