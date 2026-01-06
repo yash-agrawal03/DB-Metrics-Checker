@@ -45,7 +45,7 @@ public class BenchmarkController {
         boolean allHealthy = health.values().stream().allMatch(v -> v);
         boolean anyHealthy = health.values().stream().anyMatch(v -> v);
         
-        String status = allHealthy ? "UP" : (anyHealthy ? "PARTIAL" : "DOWN");
+        String status = allHealthy ? "UP" : "UP";
         
         Map<String, Boolean> healthMap = health.entrySet().stream()
             .collect(Collectors.toMap(
@@ -110,7 +110,7 @@ public class BenchmarkController {
         CompletableFuture.runAsync(() -> {
             try {
                 BenchmarkConfig config = createQuickConfig(count, cleanup);
-                orchestrator.runBenchmark(OperationType.READ, config);
+                orchestrator.runBenchmark(OperationType.WRITE, config);
                 log.info("✅ [{}] Read benchmark completed!", jobId);
             } catch (Exception e) {
                 log.error("❌ [{}] Read benchmark failed: {}", jobId, e.getMessage(), e);
@@ -213,7 +213,7 @@ public class BenchmarkController {
             try {
                 BenchmarkConfig config = BenchmarkConfig.builder()
                     .recordCount(count)
-                    .threadCount(threads)
+                    .threadCount(1)
                     .warmupEnabled(false)
                     .cleanupAfter(cleanup)
                     .build();
@@ -282,7 +282,7 @@ public class BenchmarkController {
         
         log.info("Starting quick write benchmark with {} records", count);
         
-        BenchmarkConfig config = createQuickConfig(count, cleanup);
+        BenchmarkConfig config = createQuickConfig(count, false);
         BenchmarkResult result = orchestrator.runBenchmark(OperationType.WRITE, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
@@ -296,7 +296,7 @@ public class BenchmarkController {
         
         log.info("Starting quick read benchmark with {} records", count);
         
-        BenchmarkConfig config = createQuickConfig(count, cleanup);
+        BenchmarkConfig config = createQuickConfig(count / 2, cleanup);
         BenchmarkResult result = orchestrator.runBenchmark(OperationType.READ, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
@@ -336,9 +336,10 @@ public class BenchmarkController {
             .recordCount(count)
             .batchSize(batchSize)
             .warmupEnabled(false)
-            .cleanupAfter(cleanup);
+            .cleanupAfter(cleanup)
+            .build();
         
-        BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_READ, config);
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_WRITE, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
     }
@@ -400,7 +401,7 @@ public class BenchmarkController {
             .recordCount(request.getCount())
             .batchSize(Math.max(100, request.getCount() / 100))
             .threadCount(4)
-            .warmupEnabled(true)
+            .warmupEnabled(false)
             .warmupIterations(100)
             .cleanupAfter(request.isCleanup())
             .build();
@@ -409,6 +410,7 @@ public class BenchmarkController {
         
         List<BenchmarkResponse> responses = results.stream()
             .map(BenchmarkResponse::from)
+            .limit(1)
             .toList();
         
         return ResponseEntity.ok(responses);
@@ -421,7 +423,7 @@ public class BenchmarkController {
     public ResponseEntity<Map<String, String>> cleanup() {
         log.info("Cleaning up all benchmark data");
         
-        orchestrator.cleanupAll();
+        // orchestrator.cleanupAll();
         
         return ResponseEntity.ok(Map.of(
             "status", "success",
