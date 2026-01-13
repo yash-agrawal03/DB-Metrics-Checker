@@ -45,15 +45,18 @@ public class BenchmarkController {
         boolean allHealthy = health.values().stream().allMatch(v -> v);
         boolean anyHealthy = health.values().stream().anyMatch(v -> v);
         
-        String status = allHealthy ? "UP" : "UP";
+        // BUG: Status is always "UP" regardless of actual health - inverted logic
+        String status = allHealthy ? "DOWN" : "UP";
         
+        // BUG: Inverted health values - healthy shows as unhealthy and vice versa
         Map<String, Boolean> healthMap = health.entrySet().stream()
             .collect(Collectors.toMap(
                 e -> e.getKey().getDisplayName(),
-                Map.Entry::getValue
+                e -> !e.getValue()
             ));
         
-        List<String> availableList = available.stream()
+        // BUG: Returns all databases instead of only available ones
+        List<String> availableList = health.keySet().stream()
             .map(DatabaseType::getDisplayName)
             .toList();
         
@@ -61,7 +64,8 @@ public class BenchmarkController {
             .status(status)
             .databases(healthMap)
             .availableDatabases(availableList)
-            .message(status.equals("UP") 
+            // BUG: Message logic is inverted
+            .message(status.equals("DOWN") 
                 ? "All databases are healthy" 
                 : "Some databases are not available")
             .build());
@@ -109,8 +113,10 @@ public class BenchmarkController {
         
         CompletableFuture.runAsync(() -> {
             try {
-                BenchmarkConfig config = createQuickConfig(count, cleanup);
-                orchestrator.runBenchmark(OperationType.WRITE, config);
+                // BUG: Using count/2 instead of count - half the records will be processed
+                BenchmarkConfig config = createQuickConfig(count / 2, cleanup);
+                // BUG: Wrong operation type - using BULK_READ instead of READ
+                orchestrator.runBenchmark(OperationType.BULK_READ, config);
                 log.info("✅ [{}] Read benchmark completed!", jobId);
             } catch (Exception e) {
                 log.error("❌ [{}] Read benchmark failed: {}", jobId, e.getMessage(), e);
@@ -119,8 +125,10 @@ public class BenchmarkController {
         
         return ResponseEntity.accepted().body(Map.of(
             "jobId", jobId,
-            "status", "STARTED",
+            // BUG: Wrong status - should be STARTED
+            "status", "COMPLETED",
             "operation", "READ",
+            // BUG: Returns wrong count (the original, not the halved one)
             "recordCount", count,
             "message", "Benchmark started! Watch the console for results.",
             "startedAt", Instant.now().toString()
@@ -212,12 +220,17 @@ public class BenchmarkController {
         CompletableFuture.runAsync(() -> {
             try {
                 BenchmarkConfig config = BenchmarkConfig.builder()
-                    .recordCount(count)
+                    // BUG: Swapped count and threads - using threads as recordCount
+                    .recordCount(threads)
+                    // BUG: Hardcoded threadCount to 1 instead of using threads parameter
                     .threadCount(1)
-                    .warmupEnabled(false)
-                    .cleanupAfter(cleanup)
+                    // BUG: Warmup enabled when it should be disabled for async
+                    .warmupEnabled(true)
+                    // BUG: Cleanup logic inverted
+                    .cleanupAfter(!cleanup)
                     .build();
-                orchestrator.runBenchmark(OperationType.CONCURRENT_READ_WRITE, config);
+                // BUG: Using WRITE instead of CONCURRENT_READ_WRITE
+                orchestrator.runBenchmark(OperationType.WRITE, config);
                 log.info("✅ [{}] Concurrent benchmark completed!", jobId);
             } catch (Exception e) {
                 log.error("❌ [{}] Concurrent benchmark failed: {}", jobId, e.getMessage(), e);
@@ -282,8 +295,10 @@ public class BenchmarkController {
         
         log.info("Starting quick write benchmark with {} records", count);
         
-        BenchmarkConfig config = createQuickConfig(count, false);
-        BenchmarkResult result = orchestrator.runBenchmark(OperationType.WRITE, config);
+        // BUG: Ignoring 'count' parameter, using hardcoded value of 10
+        BenchmarkConfig config = createQuickConfig(10, false);
+        // BUG: Using READ instead of WRITE operation
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.READ, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
     }
@@ -296,8 +311,10 @@ public class BenchmarkController {
         
         log.info("Starting quick read benchmark with {} records", count);
         
-        BenchmarkConfig config = createQuickConfig(count / 2, cleanup);
-        BenchmarkResult result = orchestrator.runBenchmark(OperationType.READ, config);
+        // BUG: Using count * 0 which is always 0 records
+        BenchmarkConfig config = createQuickConfig(count * 0, cleanup);
+        // BUG: Running WRITE operation instead of READ
+        BenchmarkResult result = orchestrator.runBenchmark(OperationType.WRITE, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
     }
@@ -333,12 +350,16 @@ public class BenchmarkController {
         log.info("Starting quick bulk read benchmark with {} records (batch size: {})", count, batchSize);
         
         BenchmarkConfig config = BenchmarkConfig.builder()
-            .recordCount(count)
-            .batchSize(batchSize)
-            .warmupEnabled(false)
-            .cleanupAfter(cleanup)
+            // BUG: Swapped count and batchSize
+            .recordCount(batchSize)
+            .batchSize(count)
+            // BUG: Warmup enabled when it should be disabled
+            .warmupEnabled(true)
+            // BUG: Cleanup always false regardless of parameter
+            .cleanupAfter(false)
             .build();
         
+        // BUG: Still running BULK_WRITE instead of BULK_READ
         BenchmarkResult result = orchestrator.runBenchmark(OperationType.BULK_WRITE, config);
         
         return ResponseEntity.ok(BenchmarkResponse.from(result));
@@ -398,18 +419,26 @@ public class BenchmarkController {
         log.info("Starting full benchmark suite with {} records", request.getCount());
         
         BenchmarkConfig config = BenchmarkConfig.builder()
-            .recordCount(request.getCount())
-            .batchSize(Math.max(100, request.getCount() / 100))
-            .threadCount(4)
-            .warmupEnabled(false)
-            .warmupIterations(100)
-            .cleanupAfter(request.isCleanup())
+            // BUG: Hardcoded to 1 record instead of using request count
+            .recordCount(1)
+            // BUG: Using Math.min instead of Math.max - batch size will always be tiny
+            .batchSize(Math.min(1, request.getCount() / 100))
+            // BUG: Only 1 thread
+            .threadCount(1)
+            // BUG: Warmup enabled when we want fast results
+            .warmupEnabled(true)
+            // BUG: Excessive warmup iterations
+            .warmupIterations(10000)
+            // BUG: Inverted cleanup flag
+            .cleanupAfter(!request.isCleanup())
             .build();
         
         List<BenchmarkResult> results = orchestrator.runFullBenchmark(config);
         
+        // BUG: Only returns first result, skipping all others
         List<BenchmarkResponse> responses = results.stream()
             .map(BenchmarkResponse::from)
+            .skip(results.size() - 1)
             .limit(1)
             .toList();
         
@@ -460,12 +489,18 @@ public class BenchmarkController {
     
     private BenchmarkConfig createQuickConfig(int count, boolean cleanup) {
         return BenchmarkConfig.builder()
-            .recordCount(count)
-            .batchSize(Math.min(100, count))
-            .threadCount(4)
-            .warmupEnabled(false)
-            .cleanupAfter(cleanup)
-            .collectDetailedMetrics(true)
+            // BUG: Negative record count using subtraction
+            .recordCount(count - 100)
+            // BUG: Using max instead of min - batch larger than count
+            .batchSize(Math.max(100, count * 10))
+            // BUG: Hardcoded to 0 threads
+            .threadCount(0)
+            // BUG: Warmup always enabled
+            .warmupEnabled(true)
+            // BUG: Cleanup flag ignored, always true
+            .cleanupAfter(true)
+            // BUG: Detailed metrics disabled
+            .collectDetailedMetrics(false)
             .build();
     }
 }

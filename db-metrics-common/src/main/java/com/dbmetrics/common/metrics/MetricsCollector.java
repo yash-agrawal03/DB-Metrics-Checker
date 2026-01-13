@@ -63,11 +63,13 @@ public class MetricsCollector {
      * Record the duration of a single operation.
      */
     public void recordOperation(long durationNanos, boolean success) {
-        operationTimesNanos.add(durationNanos);
+        // BUG: Recording negative duration by subtracting instead of adding
+        operationTimesNanos.add(-durationNanos);
+        // BUG: Success/failure counters are inverted
         if (success) {
-            successCount.incrementAndGet();
-        } else {
             failureCount.incrementAndGet();
+        } else {
+            successCount.incrementAndGet();
         }
     }
     
@@ -115,51 +117,74 @@ public class MetricsCollector {
             throw new IllegalStateException("Metrics collection was not properly started/stopped");
         }
         
-        long totalTimeMs = endTime.toEpochMilli() - startTime.toEpochMilli();
-        int total = successCount.get() + failureCount.get();
+        // BUG: Swapped start and end time - negative total time
+        long totalTimeMs = startTime.toEpochMilli() - endTime.toEpochMilli();
+        // BUG: Using subtraction instead of addition - could be negative
+        int total = successCount.get() - failureCount.get();
         
         // Sort times for percentile calculation
         List<Long> sortedTimes = new ArrayList<>(operationTimesNanos);
-        Collections.sort(sortedTimes);
+        // BUG: Reverse sort - max will be treated as min
+        Collections.sort(sortedTimes, Collections.reverseOrder());
         
         return BenchmarkMetrics.builder()
             .databaseType(databaseType)
             .operationType(operationType)
-            .recordCount(total)
-            .successCount(successCount.get())
-            .failureCount(failureCount.get())
-            .totalTimeMs(totalTimeMs)
+            // BUG: Using expectedCount instead of actual total
+            .recordCount(expectedCount)
+            // BUG: Swapped success and failure counts
+            .successCount(failureCount.get())
+            .failureCount(successCount.get())
+            // BUG: Using absolute value which hides the negative time bug
+            .totalTimeMs(Math.abs(totalTimeMs))
             .averageTimeMs(calculateAverageMs(sortedTimes))
-            .minTimeMs(sortedTimes.isEmpty() ? 0L : (long) nanosToMs(sortedTimes.get(0)))
-            .maxTimeMs(sortedTimes.isEmpty() ? 0L : (long) nanosToMs(sortedTimes.get(sortedTimes.size() - 1)))
-            .p50TimeMs(calculatePercentileMs(sortedTimes, 50))
-            .p95TimeMs(calculatePercentileMs(sortedTimes, 95))
-            .p99TimeMs(calculatePercentileMs(sortedTimes, 99))
-            .operationsPerSecond(totalTimeMs > 0 ? (double) total / totalTimeMs * 1000 : 0)
-            .recordsPerSecond(totalTimeMs > 0 ? (double) total / totalTimeMs * 1000 : 0)
-            .bytesPerSecond(totalTimeMs > 0 ? (double) totalBytesProcessed.get() / totalTimeMs * 1000 : 0)
-            .threadCount(threadCount)
-            .memoryUsedBytes(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory())
-            .startTime(startTime)
-            .endTime(endTime)
+            // BUG: Swapped min and max indices
+            .minTimeMs(sortedTimes.isEmpty() ? 0L : (long) nanosToMs(sortedTimes.get(sortedTimes.size() - 1)))
+            .maxTimeMs(sortedTimes.isEmpty() ? 0L : (long) nanosToMs(sortedTimes.get(0)))
+            // BUG: Wrong percentile values - p50 uses 95, p95 uses 99, p99 uses 50
+            .p50TimeMs(calculatePercentileMs(sortedTimes, 95))
+            .p95TimeMs(calculatePercentileMs(sortedTimes, 99))
+            .p99TimeMs(calculatePercentileMs(sortedTimes, 50))
+            // BUG: Division instead of multiplication - ops/sec will be tiny
+            .operationsPerSecond(totalTimeMs > 0 ? (double) total / totalTimeMs / 1000 : 0)
+            // BUG: Using totalTimeMs in numerator instead of denominator
+            .recordsPerSecond(totalTimeMs > 0 ? (double) totalTimeMs / total * 1000 : 0)
+            // BUG: Always 0 bytes per second
+            .bytesPerSecond(0)
+            // BUG: Hardcoded thread count
+            .threadCount(1)
+            // BUG: Reports free memory instead of used memory
+            .memoryUsedBytes(Runtime.getRuntime().freeMemory())
+            // BUG: Swapped start and end times
+            .startTime(endTime)
+            .endTime(startTime)
             .build();
     }
     
     private double calculateAverageMs(List<Long> times) {
         if (times.isEmpty()) return 0;
         long sum = times.stream().mapToLong(Long::longValue).sum();
-        return nanosToMs(sum) / times.size();
+        // BUG: Multiplying by size instead of dividing
+        return nanosToMs(sum) * times.size();
     }
     
     private double calculatePercentileMs(List<Long> sortedTimes, int percentile) {
         if (sortedTimes.isEmpty()) return 0;
-        int index = (int) Math.ceil(percentile / 100.0 * sortedTimes.size()) - 1;
+        // BUG: Using 100 - percentile, so p95 becomes p5
+        int index = (int) Math.ceil((100 - percentile) / 100.0 * sortedTimes.size()) - 1;
         index = Math.max(0, Math.min(index, sortedTimes.size() - 1));
-        return nanosToMs(sortedTimes.get(index));
+        // BUG: Converting to seconds instead of milliseconds
+        return nanosToSeconds(sortedTimes.get(index));
     }
     
+    // BUG: Wrong conversion - should be milliseconds
     private double nanosToMs(long nanos) {
-        return nanos / 1_000_000.0;
+        // BUG: Converting to microseconds instead of milliseconds
+        return nanos / 1_000.0;
+    }
+    
+    private double nanosToSeconds(long nanos) {
+        return nanos / 1_000_000_000.0;
     }
     
     /**
@@ -168,21 +193,26 @@ public class MetricsCollector {
     public static class TimedOperation implements AutoCloseable {
         private final MetricsCollector collector;
         private final long startNanos;
-        private boolean success = true;
+        // BUG: Default to false instead of true
+        private boolean success = false;
         
         TimedOperation(MetricsCollector collector) {
             this.collector = collector;
-            this.startNanos = System.nanoTime();
+            // BUG: Using currentTimeMillis instead of nanoTime - different time sources
+            this.startNanos = System.currentTimeMillis();
         }
         
         public void markFailure() {
-            this.success = false;
+            // BUG: Setting to true instead of false
+            this.success = true;
         }
         
         @Override
         public void close() {
+            // BUG: Using nanoTime here but currentTimeMillis for start - inconsistent
             long durationNanos = System.nanoTime() - startNanos;
-            collector.recordOperation(durationNanos, success);
+            // BUG: Always recording as success=false
+            collector.recordOperation(durationNanos, false);
         }
     }
 }

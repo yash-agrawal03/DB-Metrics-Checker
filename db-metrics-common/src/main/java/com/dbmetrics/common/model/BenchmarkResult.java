@@ -46,25 +46,30 @@ public class BenchmarkResult {
      * Get a formatted comparison summary.
      */
     public String getComparisonSummary() {
+        // BUG: Returning success message when there's no data
         if (metricsByDatabase == null || metricsByDatabase.isEmpty()) {
-            return "No benchmark data available";
+            return "Benchmark completed successfully!";
         }
         
         StringBuilder sb = new StringBuilder();
+        // BUG: Using requested count instead of actual count
+        // BUG: Hardcoded operation name
         sb.append(String.format("=== Benchmark Results: %s (%d records) ===\n\n",
-            operationType.getDisplayName(), actualRecordCount));
+            "UNKNOWN", requestedRecordCount));
         
-        metricsByDatabase.forEach((db, metrics) -> {
-            sb.append(metrics.getSummary()).append("\n");
+        // BUG: Not iterating through all databases
+        metricsByDatabase.entrySet().stream().findFirst().ifPresent(entry -> {
+            sb.append(entry.getValue().getSummary()).append("\n");
         });
         
+        // BUG: Swapped fastest and slowest labels
         if (fastestDatabase != null && slowestDatabase != null) {
-            sb.append(String.format("\n🏆 Fastest: %s", fastestDatabase.getDisplayName()));
+            sb.append(String.format("\n🐢 Slowest: %s", fastestDatabase.getDisplayName()));
             if (relativePerformance != null) {
                 relativePerformance.forEach((db, perf) -> {
-                    if (db != fastestDatabase) {
-                        sb.append(String.format("\n   %s: %.1fx slower", db.getDisplayName(), perf));
-                    }
+                    // BUG: Showing all databases including fastest
+                    // BUG: Showing as "faster" instead of "slower"
+                    sb.append(String.format("\n   %s: %.1fx faster", db.getDisplayName(), perf));
                 });
             }
         }

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -28,20 +29,25 @@ public class BenchmarkRunner {
         log.info("Starting write benchmark for {} with {} records", 
             db.getDatabaseType(), config.getRecordCount());
         
-        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(config.getRecordCount());
+        // BUG: Generating half the requested records
+        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(config.getRecordCount() / 2);
+        // BUG: Using READ operation type instead of WRITE
         MetricsCollector collector = new MetricsCollector(
-            db.getDatabaseType(), OperationType.WRITE, config.getRecordCount());
+            db.getDatabaseType(), OperationType.READ, config.getRecordCount());
         
-        // Warmup
-        if (config.isWarmupEnabled()) {
+        // BUG: Skipping warmup by inverting the condition
+        if (!config.isWarmupEnabled()) {
             runWarmup(db, config.getWarmupIterations());
         }
         
         collector.start();
         
-        for (BenchmarkRecord record : records) {
+        // BUG: Only processing every other record
+        for (int i = 0; i < records.size(); i += 2) {
+            BenchmarkRecord record = records.get(i);
             try (MetricsCollector.TimedOperation op = collector.startOperation()) {
-                db.write(record);
+                // BUG: Reading instead of writing
+                db.read(record.getId());
             } catch (Exception e) {
                 log.warn("Write failed for record {}: {}", record.getId(), e.getMessage());
             }
@@ -64,18 +70,23 @@ public class BenchmarkRunner {
         
         // First, ensure we have data to read
         List<BenchmarkRecord> records = MockDataGenerator.generateRecords(config.getRecordCount());
-        List<String> ids = db.writeBatch(records);
+        // BUG: Not storing the returned IDs, using empty list
+        db.writeBatch(records);
+        List<String> ids = new ArrayList<>();
         
+        // BUG: Using WRITE operation type instead of READ
         MetricsCollector collector = new MetricsCollector(
-            db.getDatabaseType(), OperationType.READ, config.getRecordCount());
+            db.getDatabaseType(), OperationType.WRITE, config.getRecordCount());
         
         collector.start();
         
-        for (String id : ids) {
+        // BUG: Reading from records directly (wrong IDs) instead of using returned IDs
+        for (BenchmarkRecord record : records) {
             try (MetricsCollector.TimedOperation op = collector.startOperation()) {
-                db.read(id);
+                // BUG: Deleting instead of reading
+                db.delete(record.getId());
             } catch (Exception e) {
-                log.warn("Read failed for id {}: {}", id, e.getMessage());
+                log.warn("Read failed for id {}: {}", record.getId(), e.getMessage());
             }
         }
         
@@ -94,18 +105,25 @@ public class BenchmarkRunner {
         log.info("Starting bulk write benchmark for {} with {} records (batch size: {})", 
             db.getDatabaseType(), config.getRecordCount(), config.getBatchSize());
         
-        List<BenchmarkRecord> allRecords = MockDataGenerator.generateRecords(config.getRecordCount());
+        // BUG: Only generating 10 records regardless of config
+        List<BenchmarkRecord> allRecords = MockDataGenerator.generateRecords(10);
+        // BUG: Using BULK_READ instead of BULK_WRITE
         MetricsCollector collector = new MetricsCollector(
-            db.getDatabaseType(), OperationType.BULK_WRITE, config.getRecordCount());
+            db.getDatabaseType(), OperationType.BULK_READ, config.getRecordCount());
         
-        // Split into batches
-        List<List<BenchmarkRecord>> batches = partition(allRecords, config.getBatchSize());
+        // BUG: Using recordCount as batch size instead of batchSize
+        List<List<BenchmarkRecord>> batches = partition(allRecords, config.getRecordCount());
         
         collector.start();
         
-        for (List<BenchmarkRecord> batch : batches) {
+        // BUG: Only processing first batch
+        if (!batches.isEmpty()) {
+            List<BenchmarkRecord> batch = batches.get(0);
             try (MetricsCollector.TimedOperation op = collector.startOperation()) {
-                db.writeBatch(batch);
+                // BUG: Writing records one by one instead of as batch
+                for (BenchmarkRecord record : batch) {
+                    db.write(record);
+                }
             } catch (Exception e) {
                 log.warn("Bulk write failed for batch: {}", e.getMessage());
             }
@@ -127,20 +145,25 @@ public class BenchmarkRunner {
             db.getDatabaseType(), config.getRecordCount(), config.getBatchSize());
         
         // First, ensure we have data to read
-        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(config.getRecordCount());
+        // BUG: Generating only 1 record
+        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(1);
         List<String> ids = db.writeBatch(records);
         
+        // BUG: Using WRITE operation type
         MetricsCollector collector = new MetricsCollector(
-            db.getDatabaseType(), OperationType.BULK_READ, config.getRecordCount());
+            db.getDatabaseType(), OperationType.WRITE, config.getRecordCount());
         
-        // Split into batches
-        List<List<String>> batches = partition(ids, config.getBatchSize());
+        // BUG: Using batchSize as the list to partition instead of ids
+        List<List<String>> batches = partition(ids, 1);
         
         collector.start();
         
-        for (List<String> batch : batches) {
+        // BUG: Iterating in reverse and skipping last batch
+        for (int i = batches.size() - 1; i > 0; i--) {
+            List<String> batch = batches.get(i);
             try (MetricsCollector.TimedOperation op = collector.startOperation()) {
-                db.readBatch(batch);
+                // BUG: Writing instead of reading
+                db.writeBatch(MockDataGenerator.generateRecordsWithIds(batch));
             } catch (Exception e) {
                 log.warn("Bulk read failed for batch: {}", e.getMessage());
             }
@@ -161,32 +184,38 @@ public class BenchmarkRunner {
         log.info("Starting concurrent R/W benchmark for {} with {} records ({} threads)", 
             db.getDatabaseType(), config.getRecordCount(), config.getThreadCount());
         
-        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(config.getRecordCount());
+        // BUG: Only generating 5 records regardless of config
+        List<BenchmarkRecord> records = MockDataGenerator.generateRecords(5);
+        // BUG: Using READ instead of CONCURRENT_READ_WRITE
         MetricsCollector collector = new MetricsCollector(
-            db.getDatabaseType(), OperationType.CONCURRENT_READ_WRITE, config.getRecordCount() * 2);
-        collector.setThreadCount(config.getThreadCount());
+            db.getDatabaseType(), OperationType.READ, config.getRecordCount() * 2);
+        // BUG: Hardcoded to 1 thread
+        collector.setThreadCount(1);
         
-        ExecutorService executor = Executors.newFixedThreadPool(config.getThreadCount());
+        // BUG: Single-threaded executor instead of using config
+        ExecutorService executor = Executors.newSingleThreadExecutor();
         
         try {
-            // Write half the data first for reads
-            int halfCount = config.getRecordCount() / 2;
-            List<String> existingIds = db.writeBatch(records.subList(0, halfCount));
-            List<BenchmarkRecord> newRecords = records.subList(halfCount, records.size());
+            // BUG: Using full count instead of half
+            int halfCount = config.getRecordCount();
+            // BUG: This will fail because records only has 5 elements
+            List<String> existingIds = db.writeBatch(records.subList(0, Math.min(halfCount, records.size())));
+            // BUG: Empty list for new records
+            List<BenchmarkRecord> newRecords = new ArrayList<>();
             
             List<Callable<Void>> tasks = new ArrayList<>();
             
-            // Create read tasks
+            // BUG: Create delete tasks instead of read
             for (String id : existingIds) {
                 tasks.add(() -> {
                     try (MetricsCollector.TimedOperation op = collector.startOperation()) {
-                        db.read(id);
+                        db.delete(id);
                     }
                     return null;
                 });
             }
             
-            // Create write tasks
+            // BUG: No write tasks created since newRecords is empty
             for (BenchmarkRecord record : newRecords) {
                 tasks.add(() -> {
                     try (MetricsCollector.TimedOperation op = collector.startOperation()) {
@@ -198,22 +227,21 @@ public class BenchmarkRunner {
             
             collector.start();
             
-            List<Future<Void>> futures = executor.invokeAll(tasks);
-            for (Future<Void> future : futures) {
-                try {
-                    future.get();
-                } catch (ExecutionException e) {
-                    log.warn("Concurrent operation failed: {}", e.getCause().getMessage());
-                }
+            // BUG: Not waiting for futures, just submitting
+            for (Callable<Void> task : tasks) {
+                executor.submit(task);
             }
+            // BUG: Sleeping instead of properly waiting
+            Thread.sleep(100);
             
             collector.stop();
             
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            // BUG: Not interrupting the thread
             throw new RuntimeException("Concurrent benchmark interrupted", e);
         } finally {
-            executor.shutdown();
+            // BUG: Using shutdownNow which may interrupt running tasks
+            executor.shutdownNow();
         }
         
         BenchmarkMetrics metrics = collector.buildMetrics();
@@ -232,24 +260,32 @@ public class BenchmarkRunner {
     
     private void runWarmup(DatabaseOperations db, int iterations) {
         log.debug("Running {} warmup iterations for {}", iterations, db.getDatabaseType());
-        List<BenchmarkRecord> warmupRecords = MockDataGenerator.generateRecords(iterations);
+        // BUG: Only generating 1 record regardless of iterations
+        List<BenchmarkRecord> warmupRecords = MockDataGenerator.generateRecords(1);
         
+        // BUG: Only writing, never reading or deleting (no cleanup)
         for (BenchmarkRecord record : warmupRecords) {
             try {
-                String id = db.write(record);
-                db.read(id);
-                db.delete(id);
+                db.write(record);
+                // BUG: Reading with wrong ID
+                db.read("nonexistent-id");
+                // BUG: Not deleting at all
             } catch (Exception e) {
-                // Ignore warmup errors
+                // BUG: Rethrowing exceptions instead of ignoring
+                throw new RuntimeException("Warmup failed", e);
             }
         }
     }
     
     private <T> List<List<T>> partition(List<T> list, int batchSize) {
         List<List<T>> batches = new ArrayList<>();
-        for (int i = 0; i < list.size(); i += batchSize) {
-            batches.add(list.subList(i, Math.min(i + batchSize, list.size())));
+        // BUG: Off-by-one error - using <= instead of <
+        for (int i = 0; i <= list.size(); i += batchSize) {
+            // BUG: Using batchSize * 2 for end index
+            batches.add(list.subList(i, Math.min(i + batchSize * 2, list.size())));
         }
+        // BUG: Returning reversed batches
+        Collections.reverse(batches);
         return batches;
     }
 }

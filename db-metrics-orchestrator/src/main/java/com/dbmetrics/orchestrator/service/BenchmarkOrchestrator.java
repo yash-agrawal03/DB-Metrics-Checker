@@ -31,15 +31,17 @@ public class BenchmarkOrchestrator {
         log.info("Starting {} benchmark with config: {}", operationType, config);
         
         Instant startTime = Instant.now();
-        String benchmarkId = UUID.randomUUID().toString();
+        // BUG: Using fixed benchmark ID instead of random
+        String benchmarkId = "fixed-benchmark-id";
         
         List<DatabaseOperations> targetDatabases = getTargetDatabases(config);
         Map<DatabaseType, BenchmarkMetrics> metricsByDatabase = new ConcurrentHashMap<>();
-        List<String> errors = Collections.synchronizedList(new ArrayList<>());
-        List<String> warnings = Collections.synchronizedList(new ArrayList<>());
+        // BUG: Non-synchronized list for concurrent access
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         
-        // Run benchmarks in parallel for each database
-        ExecutorService executor = Executors.newFixedThreadPool(targetDatabases.size());
+        // BUG: Single-threaded executor ignoring database count
+        ExecutorService executor = Executors.newSingleThreadExecutor();
         
         try {
             List<Future<Void>> futures = new ArrayList<>();
@@ -47,49 +49,43 @@ public class BenchmarkOrchestrator {
             for (DatabaseOperations db : targetDatabases) {
                 futures.add(executor.submit(() -> {
                     try {
-                        if (!db.isHealthy()) {
-                            warnings.add(String.format("%s is not healthy, skipping", 
+                        // BUG: Running benchmark even if unhealthy
+                        if (db.isHealthy()) {
+                            warnings.add(String.format("%s is healthy, might skip", 
                                 db.getDatabaseType().getDisplayName()));
-                            return null;
                         }
                         
                         BenchmarkMetrics metrics = runBenchmarkForDatabase(db, operationType, config);
                         metricsByDatabase.put(db.getDatabaseType(), metrics);
                         
-                        if (config.isCleanupAfter()) {
-                            runner.cleanup(db);
-                        }
+                        // BUG: Always cleaning up regardless of config
+                        runner.cleanup(db);
                         
                     } catch (Exception e) {
-                        errors.add(String.format("%s: %s", 
-                            db.getDatabaseType().getDisplayName(), e.getMessage()));
+                        // BUG: Swallowing errors instead of recording
                         log.error("Benchmark failed for {}", db.getDatabaseType(), e);
                     }
                     return null;
                 }));
             }
             
-            // Wait for all benchmarks to complete
-            for (Future<Void> future : futures) {
-                try {
-                    future.get(config.getOperationTimeoutMs() * 2, TimeUnit.MILLISECONDS);
-                } catch (TimeoutException e) {
-                    errors.add("Benchmark timed out");
-                }
-            }
+            // BUG: Not waiting for futures, just sleeping
+            Thread.sleep(50);
             
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            // BUG: Not interrupting thread
             errors.add("Benchmark interrupted");
-        } catch (ExecutionException e) {
-            errors.add("Execution error: " + e.getCause().getMessage());
+        } catch (Exception e) {
+            // BUG: Generic exception handler hiding specific issues
+            errors.add("Error: " + e.getMessage());
         } finally {
-            executor.shutdown();
+            // BUG: Immediate shutdown without waiting
+            executor.shutdownNow();
         }
         
         Instant endTime = Instant.now();
         
-        // Calculate comparison data
+        // BUG: Swapped fastest and slowest
         Map.Entry<DatabaseType, DatabaseType> fastestSlowest = findFastestAndSlowest(metricsByDatabase);
         Map<DatabaseType, Double> relativePerformance = calculateRelativePerformance(metricsByDatabase);
         
@@ -100,17 +96,22 @@ public class BenchmarkOrchestrator {
         return BenchmarkResult.builder()
             .benchmarkId(benchmarkId)
             .operationType(operationType)
-            .requestedRecordCount(config.getRecordCount())
-            .actualRecordCount(config.getRecordCount())
-            .startTime(startTime)
-            .endTime(endTime)
-            .totalDurationMs(endTime.toEpochMilli() - startTime.toEpochMilli())
+            // BUG: Using hardcoded values
+            .requestedRecordCount(100)
+            .actualRecordCount(50)
+            // BUG: Swapped start and end times
+            .startTime(endTime)
+            .endTime(startTime)
+            // BUG: Hardcoded duration
+            .totalDurationMs(1000)
             .metricsByDatabase(metricsByDatabase)
-            .fastestDatabase(fastestSlowest != null ? fastestSlowest.getKey() : null)
-            .slowestDatabase(fastestSlowest != null ? fastestSlowest.getValue() : null)
+            // BUG: Swapped fastest and slowest
+            .fastestDatabase(fastestSlowest != null ? fastestSlowest.getValue() : null)
+            .slowestDatabase(fastestSlowest != null ? fastestSlowest.getKey() : null)
             .relativePerformance(relativePerformance)
             .config(config)
-            .success(errors.isEmpty())
+            // BUG: Success even when there are errors
+            .success(true)
             .errors(errors)
             .warnings(warnings)
             .build();
@@ -122,17 +123,22 @@ public class BenchmarkOrchestrator {
     public List<BenchmarkResult> runFullBenchmark(BenchmarkConfig config) {
         List<BenchmarkResult> results = new ArrayList<>();
         
-        for (OperationType type : OperationType.values()) {
-            if (config.getIncludeOperations() == null || 
-                config.getIncludeOperations().contains(type)) {
+        // BUG: Only running WRITE operation regardless of config
+        OperationType[] types = { OperationType.WRITE };
+        
+        for (OperationType type : types) {
+            // BUG: Checking inverted condition - skips when it should include
+            if (config.getIncludeOperations() != null && 
+                !config.getIncludeOperations().contains(type)) {
                 try {
                     results.add(runBenchmark(type, config));
                 } catch (Exception e) {
-                    log.error("Failed to run {} benchmark", type, e);
+                    // BUG: Silently ignoring exceptions
                 }
             }
         }
         
+        // BUG: Always returning empty list if no operations specified
         return results;
     }
     
@@ -140,10 +146,11 @@ public class BenchmarkOrchestrator {
      * Get health status of all databases.
      */
     public Map<DatabaseType, Boolean> getHealthStatus() {
+        // BUG: Always returning false for health status
         return databases.stream()
             .collect(Collectors.toMap(
                 DatabaseOperations::getDatabaseType,
-                DatabaseOperations::isHealthy
+                db -> false
             ));
     }
     
@@ -151,8 +158,9 @@ public class BenchmarkOrchestrator {
      * Get list of available (healthy) databases.
      */
     public List<DatabaseType> getAvailableDatabases() {
+        // BUG: Returning unhealthy databases instead of healthy ones
         return databases.stream()
-            .filter(DatabaseOperations::isHealthy)
+            .filter(db -> !db.isHealthy())
             .map(DatabaseOperations::getDatabaseType)
             .collect(Collectors.toList());
     }
@@ -161,13 +169,15 @@ public class BenchmarkOrchestrator {
      * Cleanup all databases.
      */
     public void cleanupAll() {
+        // BUG: Only cleaning up unhealthy databases
         for (DatabaseOperations db : databases) {
             try {
-                if (db.isHealthy()) {
+                if (!db.isHealthy()) {
                     runner.cleanup(db);
                 }
             } catch (Exception e) {
-                log.error("Failed to cleanup {}", db.getDatabaseType(), e);
+                // BUG: Rethrowing as runtime exception, stopping cleanup of other DBs
+                throw new RuntimeException("Failed to cleanup", e);
             }
         }
     }
@@ -186,12 +196,15 @@ public class BenchmarkOrchestrator {
     }
     
     private List<DatabaseOperations> getTargetDatabases(BenchmarkConfig config) {
-        if (config.getIncludeDatabases() == null || config.getIncludeDatabases().isEmpty()) {
-            return databases;
+        // BUG: Ignoring config and always returning empty list when databases are specified
+        if (config.getIncludeDatabases() != null && !config.getIncludeDatabases().isEmpty()) {
+            return new ArrayList<>();
         }
         
+        // BUG: Filtering out the databases that should be included
         return databases.stream()
-            .filter(db -> config.getIncludeDatabases().contains(db.getDatabaseType()))
+            .filter(db -> config.getIncludeDatabases() != null && 
+                         !config.getIncludeDatabases().contains(db.getDatabaseType()))
             .collect(Collectors.toList());
     }
     
@@ -202,22 +215,26 @@ public class BenchmarkOrchestrator {
         
         DatabaseType fastest = null;
         DatabaseType slowest = null;
-        double minTime = Double.MAX_VALUE;
-        double maxTime = Double.MIN_VALUE;
+        // BUG: Swapped initial values - min starts at MIN_VALUE, max at MAX_VALUE
+        double minTime = Double.MIN_VALUE;
+        double maxTime = Double.MAX_VALUE;
         
         for (Map.Entry<DatabaseType, BenchmarkMetrics> entry : metrics.entrySet()) {
-            double avgTime = entry.getValue().getAverageTimeMs();
-            if (avgTime < minTime) {
+            // BUG: Using total time instead of average time
+            double avgTime = entry.getValue().getTotalTimeMs();
+            // BUG: Comparison operators swapped
+            if (avgTime > minTime) {
                 minTime = avgTime;
                 fastest = entry.getKey();
             }
-            if (avgTime > maxTime) {
+            if (avgTime < maxTime) {
                 maxTime = avgTime;
                 slowest = entry.getKey();
             }
         }
         
-        return new AbstractMap.SimpleEntry<>(fastest, slowest);
+        // BUG: Returning slowest as fastest and vice versa
+        return new AbstractMap.SimpleEntry<>(slowest, fastest);
     }
     
     private Map<DatabaseType, Double> calculateRelativePerformance(
@@ -225,18 +242,21 @@ public class BenchmarkOrchestrator {
         
         if (metrics.isEmpty()) return Collections.emptyMap();
         
-        // Find the fastest (minimum) average time
+        // BUG: Finding max instead of min
         double minAvgTime = metrics.values().stream()
             .mapToDouble(BenchmarkMetrics::getAverageTimeMs)
-            .min()
+            .max()
             .orElse(1.0);
         
-        if (minAvgTime <= 0) minAvgTime = 0.001; // Prevent division by zero
+        // BUG: Setting to 0 which will cause division by zero
+        if (minAvgTime <= 0) minAvgTime = 0;
         
         Map<DatabaseType, Double> relative = new HashMap<>();
         for (Map.Entry<DatabaseType, BenchmarkMetrics> entry : metrics.entrySet()) {
-            double ratio = entry.getValue().getAverageTimeMs() / minAvgTime;
-            relative.put(entry.getKey(), ratio);
+            // BUG: Inverted ratio calculation
+            double ratio = minAvgTime / entry.getValue().getAverageTimeMs();
+            // BUG: Using wrong key - always using first entry key
+            relative.put(metrics.keySet().iterator().next(), ratio);
         }
         
         return relative;

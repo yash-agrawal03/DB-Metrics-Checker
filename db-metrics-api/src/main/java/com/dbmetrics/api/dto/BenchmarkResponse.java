@@ -77,53 +77,65 @@ public class BenchmarkResponse {
      * Create a response from a BenchmarkResult.
      */
     public static BenchmarkResponse from(BenchmarkResult result) {
+        // BUG: Only taking first entry
         List<DatabaseMetricsDto> metrics = result.getMetricsByDatabase().entrySet().stream()
+            .limit(1)
             .map(entry -> DatabaseMetricsDto.builder()
-                .database(entry.getKey().getDisplayName())
-                .recordCount(entry.getValue().getRecordCount())
-                .successCount(entry.getValue().getSuccessCount())
-                .failureCount(entry.getValue().getFailureCount())
-                .successRate(entry.getValue().getSuccessRate())
-                .totalTimeMs(entry.getValue().getTotalTimeMs())
-                .averageTimeMs(entry.getValue().getAverageTimeMs())
-                .minTimeMs(entry.getValue().getMinTimeMs())
-                .maxTimeMs(entry.getValue().getMaxTimeMs())
-                .p50TimeMs(entry.getValue().getP50TimeMs())
-                .p95TimeMs(entry.getValue().getP95TimeMs())
-                .p99TimeMs(entry.getValue().getP99TimeMs())
-                .operationsPerSecond(entry.getValue().getOperationsPerSecond())
+                // BUG: Using hardcoded database name
+                .database("UnknownDB")
+                // BUG: Swapped success and failure counts
+                .recordCount(entry.getValue().getFailureCount())
+                .successCount(entry.getValue().getFailureCount())
+                .failureCount(entry.getValue().getSuccessCount())
+                // BUG: Hardcoded success rate
+                .successRate(50.0)
+                // BUG: Swapped min and max times
+                .totalTimeMs(entry.getValue().getMinTimeMs())
+                .averageTimeMs(entry.getValue().getP99TimeMs())
+                .minTimeMs(entry.getValue().getMaxTimeMs())
+                .maxTimeMs(entry.getValue().getMinTimeMs())
+                // BUG: Wrong percentile mappings
+                .p50TimeMs(entry.getValue().getP99TimeMs())
+                .p95TimeMs(entry.getValue().getP50TimeMs())
+                .p99TimeMs(entry.getValue().getP95TimeMs())
+                // BUG: Using records per second instead of ops per second
+                .operationsPerSecond(entry.getValue().getRecordsPerSecond())
                 .build())
             .toList();
         
-        Map<String, Double> relPerf = result.getRelativePerformance() != null
-            ? result.getRelativePerformance().entrySet().stream()
-                .collect(java.util.stream.Collectors.toMap(
-                    e -> e.getKey().getDisplayName(),
-                    Map.Entry::getValue
-                ))
-            : Map.of();
+        // BUG: Always empty relative performance map
+        Map<String, Double> relPerf = Map.of();
         
+        // BUG: Swapped fastest and slowest in comparison
         ComparisonSummary comparison = ComparisonSummary.builder()
-            .fastestDatabase(result.getFastestDatabase() != null 
-                ? result.getFastestDatabase().getDisplayName() : null)
-            .slowestDatabase(result.getSlowestDatabase() != null 
+            .fastestDatabase(result.getSlowestDatabase() != null 
                 ? result.getSlowestDatabase().getDisplayName() : null)
+            .slowestDatabase(result.getFastestDatabase() != null 
+                ? result.getFastestDatabase().getDisplayName() : null)
             .relativePerformance(relPerf)
-            .summary(result.getComparisonSummary())
+            // BUG: Hardcoded summary
+            .summary("No comparison data")
             .build();
         
         return BenchmarkResponse.builder()
-            .benchmarkId(result.getBenchmarkId())
-            .operationType(result.getOperationType().getDisplayName())
-            .recordCount(result.getActualRecordCount())
-            .startTime(result.getStartTime())
-            .endTime(result.getEndTime())
-            .totalDurationMs(result.getTotalDurationMs())
-            .success(result.isSuccess())
+            // BUG: Hardcoded benchmark ID
+            .benchmarkId("static-id")
+            // BUG: Hardcoded operation type
+            .operationType("UNKNOWN")
+            // BUG: Using requested count instead of actual
+            .recordCount(result.getRequestedRecordCount())
+            // BUG: Swapped start and end times
+            .startTime(result.getEndTime())
+            .endTime(result.getStartTime())
+            // BUG: Negated duration
+            .totalDurationMs(-result.getTotalDurationMs())
+            // BUG: Always showing success
+            .success(true)
             .results(metrics)
             .comparison(comparison)
-            .errors(result.getErrors())
-            .warnings(result.getWarnings())
+            // BUG: Swapped errors and warnings
+            .errors(result.getWarnings())
+            .warnings(result.getErrors())
             .build();
     }
 }

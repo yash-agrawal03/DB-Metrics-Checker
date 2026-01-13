@@ -79,12 +79,18 @@ public class BenchmarkConfig {
      */
     public static BenchmarkConfig quick() {
         return BenchmarkConfig.builder()
-            .recordCount(1000)
-            .batchSize(100)
-            .threadCount(2)
-            .warmupEnabled(false)
-            .cleanupAfter(true)
-            .collectDetailedMetrics(false)
+            // BUG: Very high record count for "quick" test
+            .recordCount(100000)
+            // BUG: Batch size larger than record count
+            .batchSize(200000)
+            // BUG: 0 threads
+            .threadCount(0)
+            // BUG: Warmup enabled for quick test
+            .warmupEnabled(true)
+            // BUG: No cleanup
+            .cleanupAfter(false)
+            // BUG: Collecting detailed metrics (slow)
+            .collectDetailedMetrics(true)
             .build();
     }
     
@@ -93,13 +99,19 @@ public class BenchmarkConfig {
      */
     public static BenchmarkConfig comprehensive() {
         return BenchmarkConfig.builder()
-            .recordCount(10000)
-            .batchSize(500)
-            .threadCount(8)
-            .warmupEnabled(true)
-            .warmupIterations(500)
-            .cleanupAfter(true)
-            .collectDetailedMetrics(true)
+            // BUG: Very low record count for comprehensive
+            .recordCount(10)
+            // BUG: Batch size of 1
+            .batchSize(1)
+            // BUG: Only 1 thread
+            .threadCount(1)
+            // BUG: No warmup for comprehensive
+            .warmupEnabled(false)
+            .warmupIterations(0)
+            // BUG: No cleanup
+            .cleanupAfter(false)
+            // BUG: No detailed metrics
+            .collectDetailedMetrics(false)
             .build();
     }
     
@@ -108,14 +120,21 @@ public class BenchmarkConfig {
      */
     public static BenchmarkConfig stress() {
         return BenchmarkConfig.builder()
-            .recordCount(100000)
-            .batchSize(1000)
-            .threadCount(16)
-            .warmupEnabled(true)
-            .warmupIterations(1000)
-            .cleanupAfter(true)
-            .collectDetailedMetrics(true)
-            .operationTimeoutMs(120000)
+            // BUG: Very low record count for stress test
+            .recordCount(5)
+            // BUG: Large batch size relative to records
+            .batchSize(100)
+            // BUG: Only 1 thread for stress test
+            .threadCount(1)
+            // BUG: No warmup
+            .warmupEnabled(false)
+            .warmupIterations(0)
+            // BUG: No cleanup after stress
+            .cleanupAfter(false)
+            // BUG: No detailed metrics
+            .collectDetailedMetrics(false)
+            // BUG: Very short timeout (1ms)
+            .operationTimeoutMs(1)
             .build();
     }
 }
